@@ -204,12 +204,12 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   pl_surf.clear();
   pl_corn.clear();
   pl_full.clear();
-  pcl::PointCloud<ouster_ros::Point> pl_orig;
+  pcl::PointCloud<ouster_ros::Point> pl_orig;  // <ouster_ros::Point> 타입의 포인트 클라우드로 msg 수신
   pcl::fromROSMsg(*msg, pl_orig);
   int plsize = pl_orig.size();
   pl_corn.reserve(plsize);
   pl_surf.reserve(plsize);
-  if (feature_enabled)
+  if (feature_enabled)  // fast-lio2는 기본적으로 feature_enabled=false
   {
     for (int i = 0; i < N_SCANS; i++)
     {
@@ -264,9 +264,9 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
       give_feature(pl, types);
     }
   }
-  else
+  else  // fast-lio2는 feature_enabled=false 이므로 else에 해당됨
   {
-    double time_stamp = msg->header.stamp.toSec();
+    double time_stamp = msg->header.stamp.toSec();  // ouster는 타임스탬프가 있기 때문에 velodyne 처럼 yaw로 time 계산하지 않음
     // cout << "===================================" << endl;
     // printf("Pt size = %d, N_SCANS = %d\r\n", plsize, N_SCANS);
     for (int i = 0; i < pl_orig.points.size(); i++)
@@ -301,7 +301,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     pl_corn.clear();
     pl_full.clear();
 
-    pcl::PointCloud<velodyne_ros::Point> pl_orig;
+    pcl::PointCloud<velodyne_ros::Point> pl_orig;  // <velodyne_ros::Point> 타입의 포인트 클라우드로 msg 수신
     pcl::fromROSMsg(*msg, pl_orig);
     int plsize = pl_orig.points.size();
     if (plsize == 0) return;
@@ -319,23 +319,23 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     {
       given_offset_time = true;
     }
-    else // 각 포인트에 대한 타임스탬프가 제공되지 않는다면
+    else // 각 포인트에 대한 타임스탬프가 제공되지 않는다면 시작/종료 yaw 계산 -> yaw 값 이용해서 time 정보 계산
     {
       given_offset_time = false;
-      double yaw_first = atan2(pl_orig.points[0].y, pl_orig.points[0].x) * 57.29578;
+      double yaw_first = atan2(pl_orig.points[0].y, pl_orig.points[0].x) * 57.29578;  // 시작 yaw 계산
       double yaw_end  = yaw_first;
       int layer_first = pl_orig.points[0].ring;
       for (uint i = plsize - 1; i > 0; i--)
       {
         if (pl_orig.points[i].ring == layer_first)
         {
-          yaw_end = atan2(pl_orig.points[i].y, pl_orig.points[i].x) * 57.29578; // 종료 yaw 계산
+          yaw_end = atan2(pl_orig.points[i].y, pl_orig.points[i].x) * 57.29578; // 종료 yaw 계산 (시작 yaw와 동일 ring의 마지막 포인트)
           break;
         }
       }
     }
 
-    if(feature_enabled)
+    if(feature_enabled)  // fast-lio2는 기본적으로 feature_enabled=false
     {
       for (int i = 0; i < N_SCANS; i++)
       {
@@ -412,13 +412,14 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
         give_feature(pl, types);
       }
     }
-    else
+    else  // feature_enabled=false인 경우 (fast-lio2)
     {
       for (int i = 0; i < plsize; i++)
       {
         PointType added_pt;
         // cout<<"!!!!!!"<<i<<" "<<plsize<<endl;
-        
+
+        // original points를 added_pt에 저장
         added_pt.normal_x = 0;
         added_pt.normal_y = 0;
         added_pt.normal_z = 0;
@@ -428,7 +429,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
         added_pt.intensity = pl_orig.points[i].intensity;
         added_pt.curvature = pl_orig.points[i].time * time_unit_scale;  // curvature unit: ms // cout<<added_pt.curvature<<endl;
 
-        if (!given_offset_time)
+        if (!given_offset_time)  // 포인트에 time 정보가 없으면
         {
           int layer = pl_orig.points[i].ring;
           double yaw_angle = atan2(added_pt.y, added_pt.x) * 57.2957;
@@ -444,7 +445,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
               continue;
           }
 
-          // compute offset time
+          // compute offset time : yaw 값 이용해 offset time 계산해 point curvature에 저장
           if (yaw_angle <= yaw_fp[layer])
           {
             added_pt.curvature = (yaw_fp[layer]-yaw_angle) / omega_l;
@@ -460,7 +461,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
           time_last[layer]=added_pt.curvature;
         }
 
-        if (i % point_filter_num == 0)
+        if (i % point_filter_num == 0)  // point_filter_num(e.g. velodyne : 4)개의 포인트마다 블라인드 영역 밖이면 pl_surf에 저장
         {
           if(added_pt.x*added_pt.x+added_pt.y*added_pt.y+added_pt.z*added_pt.z > (blind * blind))
           {
