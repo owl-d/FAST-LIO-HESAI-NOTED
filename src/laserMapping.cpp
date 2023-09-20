@@ -740,25 +740,25 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         {
             /** Find the closest surfaces in the map **/
             ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
-            // NN(nearest neighbor) 포인트 수가 NUM_MATCH_POINTS 이하이거나 NN과 feature point 사이의 거리가 5m 보다 크면 invalid 포인트.
+            // NN(nearest neighbor) 포인트 수가 NUM_MATCH_POINTS 이하이거나 NN과 feature point 사이의 거리가 5m 보다 크면 false (= 평면이 아니다)
             point_selected_surf[i] = points_near.size() < NUM_MATCH_POINTS ? false : pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
         }
 
-        if (!point_selected_surf[i]) continue;  // 포인트가 invalid 포인트라면 continue
+        if (!point_selected_surf[i]) continue;  // false이면 continue, true이면(=평면일 가능성이 있다) 아래 과정에서 평면인지 판단
 
         VF(4) pabcd;                                // plane 포인트 정보
-        point_selected_surf[i] = false;             // plane 포인트인지 계산하기 위해 invalid point로 설정
+        point_selected_surf[i] = false;             // 일단 false로 해두고 평면 포인트 맞다고 판단되면 나중에 true로 변경함
 
         // 평면 방정식 ax+by+cz+d=0을 피팅하고 point-to-plane 거리 계산
         if (esti_plane(pabcd, points_near, 0.1f))   // 평면 포인트 법선 벡터 찾기 (common_lib.h)
         {
             float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);  // point-to-plane 거리 계산
-            float s = 1 - 0.9 * fabs(pd2) / sqrt(p_body.norm());                                                    // residual 계산
+            float s = 1 - 0.9 * fabs(pd2) / sqrt(p_body.norm());                                                    // 0-1 사이의 값, range가 클수록 평면에서 좀 더 멀어도 허용해줌
 
-            if (s > 0.9)    // residual이 threshold보다 크면 valid 포인트
+            if (s > 0.9)    // residual이 threshold보다 크면 평면 위의 포인트가 맞다고 판단. s가 1에 가까울수록 평면 위에 있다는 의미이다.
             {
                 point_selected_surf[i] = true;      // valid point flag
-                normvec->points[i].x = pabcd(0);    // 법선 벡터 저장
+                normvec->points[i].x = pabcd(0);    // 법선 벡터 저장 (residual 계산에 필요)
                 normvec->points[i].y = pabcd(1);
                 normvec->points[i].z = pabcd(2);
                 normvec->points[i].intensity = pd2; // 법선 벡터의 intensity에 point-to-plane 거리 저장
@@ -771,16 +771,16 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
 
     for (int i = 0; i < feats_down_size; i++)
     {
-        if (point_selected_surf[i]) // valid 포인트이면
+        if (point_selected_surf[i]) // 평면 위의 포인트이면
         {
-            laserCloudOri->points[effct_feat_num] = feats_down_body->points[i]; // body 포인트 저장
-            corr_normvect->points[effct_feat_num] = normvec->points[i];         // fitting plane 포인트
+            laserCloudOri->points[effct_feat_num] = feats_down_body->points[i]; // 바디 프레임 기준 surf feature point
+            corr_normvect->points[effct_feat_num] = normvec->points[i];         // 평면의 법선 벡터
             total_residual += res_last[i];          // 총 residual 계산
             effct_feat_num ++;                      // effective feature points 카운트 + 1
         }
     }
 
-    if (effct_feat_num < 1)
+    if (effct_feat_num < 1)                 // surf feature point 없으면 return
     {
         ekfom_data.valid = false;
         ROS_WARN("No Effective Points! \n");
@@ -792,8 +792,8 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     double solve_start_  = omp_get_wtime();             // solving 시작 시간
     
     /*** Computation of Measuremnt Jacobian matrix H=J*P*J' and measurents vector ***/
-    ekfom_data.h_x = MatrixXd::Zero(effct_feat_num, 12);    // 자코비안 행렬. 논문에서 eq. (23)
-    ekfom_data.h.resize(effct_feat_num);                    // vector h
+    ekfom_data.h_x = MatrixXd::Zero(effct_feat_num, 12);    // measurement model h의 자코비안 H. 논문에서 eq. (23)
+    ekfom_data.h.resize(effct_feat_num);                    // measurement vector h
 
     // 관측값과 에러의 자코비안 행렬 구하기. eq. (14, 12, 13)
     for (int i = 0; i < effct_feat_num; i++)
@@ -884,11 +884,11 @@ int main(int argc, char** argv)
     FOV_DEG = (fov_deg + 10.0) > 179.9 ? 179.9 : (fov_deg + 10.0);
     HALF_FOV_COS = cos((FOV_DEG) * 0.5 * PI_M / 180.0);
 
-    _featsArray.reset(new PointCloudXYZI());
+    _featsArray.reset(new PointCloudXYZI());    // 사용 X
 
     memset(point_selected_surf, true, sizeof(point_selected_surf)); // point_selected_surf 배열(plane point 선택에 사용)의 모든 요소를 true로 설정
     memset(res_last, -1000.0f, sizeof(res_last));                   // res_last 배열(plane fitting에 사용)의 모든 요소를 -1000.0로 설정
-    downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);   // 복셀그리드 필터 파라미터 설정
+    downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);   // 복셀그리드 필터 파라미터 설정 (최소 복셀 사이즈로 설정)
     downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);       // 복셀그리드 필터 파라미터 설정
     memset(point_selected_surf, true, sizeof(point_selected_surf));
     memset(res_last, -1000.0f, sizeof(res_last));
@@ -902,7 +902,7 @@ int main(int argc, char** argv)
     p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 
     double epsi[23] = {0.001};
-    fill(epsi, epsi+23, 0.001);         // epsi의 모든 배열 요소 값을 0.001로 설정
+    fill(epsi, epsi+23, 0.001);         // epsi(수렴 threshold)의 모든 배열 요소 값을 0.001로 설정
     // h_dyn_share_in()으로 측정값(z), 예측 측정값(h), 편미분 행렬(h_x, h_v), 노이즈 공분산(R) 계산
     kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, NUM_MAX_ITERATIONS, epsi);    //함수 주소를 kf 객체에 전달.
 
@@ -987,7 +987,7 @@ int main(int argc, char** argv)
             lasermap_fov_segment();
 
             /*** downsample the feature points in a scan ***/
-            downSizeFilterSurf.setInputCloud(feats_undistort);  // 왜곡 보정된 포인트 클라우
+            downSizeFilterSurf.setInputCloud(feats_undistort);  // 왜곡 보정된 포인트 클라우드
             downSizeFilterSurf.filter(*feats_down_body);        // 다운샘플링으로 필터링 된 포인트 클라우드
             t1 = omp_get_wtime();                               // 시간 기록
             feats_down_size = feats_down_body->points.size();   // 필터링 된 포인트 수
