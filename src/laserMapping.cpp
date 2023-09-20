@@ -299,10 +299,10 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
     mtx_buffer.lock();  // lock
     scan_count ++;
     double preprocess_start_time = omp_get_wtime(); // time 저장
-    if (msg->header.stamp.toSec() < last_timestamp_lidar)
+    if (msg->header.stamp.toSec() < last_timestamp_lidar)    // 현재 라이다 타임스탬프가 이전 라이다 타임스탬프보다 작으면
     {
-        ROS_ERROR("lidar loop back, clear buffer");
-        lidar_buffer.clear();
+        ROS_ERROR("lidar loop back, clear buffer");    // 에러 출력
+        lidar_buffer.clear();                          // 라이다 버퍼 비우기
     }
 
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
@@ -337,17 +337,17 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         printf("IMU and LiDAR not Synced, IMU time: %lf, lidar header time: %lf \n",last_timestamp_imu, last_timestamp_lidar);
     }
 
-    // 시간 동기화 플래그가 true이고 IMU와 라이다의 타임스탬프가 1s 이상 차이나면 동기화를 수행한다.
+    // 시간 동기화 플래그가 true이고 IMU와 라이다의 타임스탬프가 1s 이상 차이나면
     if (time_sync_en && !timediff_set_flg && abs(last_timestamp_lidar - last_timestamp_imu) > 1 && !imu_buffer.empty())
     {
         timediff_set_flg = true;    // 시간 동기화 여부를 알려주는 flag를 true로 설정
-        timediff_lidar_wrt_imu = last_timestamp_lidar + 0.1 - last_timestamp_imu;
+        timediff_lidar_wrt_imu = last_timestamp_lidar + 0.1 - last_timestamp_imu;    // 두 타임스탬프의 차이 계산(이때 0.1을 더함) -> imu_cbk에서 사용
         printf("Self sync IMU and LiDAR, time diff is %.10lf \n", timediff_lidar_wrt_imu);
     }
 
-    PointCloudXYZI::Ptr  ptr(new PointCloudXYZI()); // 수신한 라이다 데이터를 pcl 포인트 크라우드 형식에 저장
+    PointCloudXYZI::Ptr  ptr(new PointCloudXYZI()); // 수신한 라이다 데이터를 pcl 포인트 클라우드 형식에 저장
     p_pre->process(msg, ptr);   // p_pre : 전처리 클래스의 smart pointer
-    lidar_buffer.push_back(ptr);
+    lidar_buffer.push_back(ptr);                    // ptr(=pl_surf) 저장
     time_buffer.push_back(last_timestamp_lidar);
     
     s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time; // 포인트 클라우드 전처리에 걸린 총 시간
@@ -456,7 +456,7 @@ bool sync_packages(MeasureGroup &meas)
         lidar_pushed = true;    // 라이다 측정을 성공적응로 추출했다는 flag
     }
 
-    // 마지막 IMU 타임스탬프(queue의 마지막)는 마지막 라이다 타임스탬프보다 빠를 수 없다. (비교 할 때 last_timestamp_imu에 0.1을 더하기 때문)
+    // 마지막 IMU 타임스탬프(queue의 마지막)는 마지막 라이다 타임스탬프보다 빠를 수 없다. (타임 스탬프 차이를 계산할 때 last_timestamp_imu에 0.1을 더하기 때문)
     if (last_timestamp_imu < lidar_end_time)
     {
         return false;
