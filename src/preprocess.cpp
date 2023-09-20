@@ -177,8 +177,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
       if((msg->points[i].line < N_SCANS) && ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00))
       {
         valid_num ++; // 유효 포인트 수 + 1
-        // 동일 간격의 다운샘플링
-        if (valid_num % point_filter_num == 0)
+        if (valid_num % point_filter_num == 0) // point_filter_num(e.g. avia : 3)마다 한 포인트씩 (= 1/3 points filtering)
         {
           pl_full[i].x = msg->points[i].x; // 포인트의 x 좌표
           pl_full[i].y = msg->points[i].y; // 포인트의 y 좌표
@@ -186,13 +185,13 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
           pl_full[i].intensity = msg->points[i].reflectivity; // 포인트의 intensity
           pl_full[i].curvature = msg->points[i].offset_time / float(1000000); // 곡률에 각 레이저 포인트의 시간 저장해 사용, curvature unit: ms
 
-          // 현재 포인트와 이전 포인트 사이의 거리가 충분히 크고(> 1e-7) 최소 거리 threshold 밖이면 현재 포인트가 useful 하다고 판단해 pl_surf queue에 추가한다.
+          // 현재 포인트와 이전 포인트 사이의 거리가 크고(> 1e-7)(= 둘은 다른 포인트) 포인트까지의 거리가 블라인드 영역 밖이면 현재 포인트가 useful 하다고 판단
           if(((abs(pl_full[i].x - pl_full[i-1].x) > 1e-7) 
               || (abs(pl_full[i].y - pl_full[i-1].y) > 1e-7)
               || (abs(pl_full[i].z - pl_full[i-1].z) > 1e-7))
               && (pl_full[i].x * pl_full[i].x + pl_full[i].y * pl_full[i].y + pl_full[i].z * pl_full[i].z > (blind * blind)))
           {
-            pl_surf.push_back(pl_full[i]);
+            pl_surf.push_back(pl_full[i]);  // pl_surf 에 추가
           }
         }
       }
