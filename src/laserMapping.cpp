@@ -375,7 +375,7 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
     mtx_buffer.lock();
 
-    // 현재 IMU 타임스탬프가 이전 IMU보다 이전이면 IMU 데이터가 잘못된 것이므로 캐시 queue 비움
+    // 현재 IMU 타임스탬프가 이전 IMU보다 이전이면 IMU 데이터가 잘못된 것이므로 imu_buffer 비움
     if (timestamp < last_timestamp_imu)
     {
         ROS_WARN("imu loop back, clear buffer");
@@ -420,21 +420,21 @@ void save_path(const nav_msgs::Path::ConstPtr &msg)
     cnt++; 
 }
 
-// 버퍼에 있는 데이터를 처리하고, 캐시 queue에서 두 라이다 데이터 사이의 IMU 데이터를 꺼내 조정하고 meas에 저장한다. 
+// 버퍼에 있는 데이터를 처리하고, 두 라이다 사이의 IMU 데이터를 꺼내 조정하고 meas에 저장한다. 
 double lidar_mean_scantime = 0.0;
 int    scan_num = 0;
 bool sync_packages(MeasureGroup &meas)
 {
-    if (lidar_buffer.empty() || imu_buffer.empty()) {   // 캐시 queue에 데이터가 없으면, return false
+    if (lidar_buffer.empty() || imu_buffer.empty()) {   // lidar_buffer 또는 imu_buffer 데이터가 없으면, return false
         return false;
     }
 
     /*** push a lidar scan ***/
     // meas에 넣을 라이다 데이터가 없으면 아래의 연산을 수행한다.
-    if(!lidar_pushed)
+    if(!lidar_pushed)    // lidar_pushed=false가 디폴트
     {
-        meas.lidar = lidar_buffer.front();  // 라이다 캐시 queue 포인트 클라우드를 meas에 저장 
-        meas.lidar_beg_time = time_buffer.front();
+        meas.lidar = lidar_buffer.front();            // lidar_buffer 포인트 클라우드를 meas에 저장 
+        meas.lidar_beg_time = time_buffer.front();    // lidar 데이터의 begin/end time meas에 저장
         if (meas.lidar->points.size() <= 1) // 라이다에 포인트 클라우드가 없으면 return false
         {
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
@@ -447,7 +447,7 @@ bool sync_packages(MeasureGroup &meas)
         else
         {
             scan_num ++;
-            lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);
+            lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);    // 라이다 end time = 라이다 타임스탬프 + (라이다 데이터 안 마지막 포인트의 time)
             lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num;
         }
 
@@ -457,6 +457,7 @@ bool sync_packages(MeasureGroup &meas)
     }
 
     // 마지막 IMU 타임스탬프(queue의 마지막)는 마지막 라이다 타임스탬프보다 빠를 수 없다. (타임 스탬프 차이를 계산할 때 last_timestamp_imu에 0.1을 더하기 때문)
+    // IMU의 Hz가 라이다보다 더 크고, 라이다를 IMU 기준으로 맞추기 때문에(라이다 end time 뒤에 있는 IMU로 투영) IMU가 더 최신이어야 한다.
     if (last_timestamp_imu < lidar_end_time)
     {
         return false;
@@ -466,7 +467,7 @@ bool sync_packages(MeasureGroup &meas)
     double imu_time = imu_buffer.front()->header.stamp.toSec();
     meas.imu.clear();
     // lidar_beg_time 과 lidar_end_time 사이의 모든 IMU 데이터에 대해
-    // IMU 캐시 queue의 데이터 타임스탬프가 라이다 종료 타임스탬프보다 빠르면, 이번 프레임의 IMU 데이터를 표현하여 meas에 저장된다.
+    // IMU 타임스탬프가 라이다 종료 타임스탬프보다 빠르면, 이번 프레임의 IMU 데이터를 표현하여 meas에 저장된다.
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
     {
         imu_time = imu_buffer.front()->header.stamp.toSec();    // IMU 데이터의 타임스탬프
