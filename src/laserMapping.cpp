@@ -949,10 +949,9 @@ int main(int argc, char** argv)
     {
         if (flg_exit) break;        // 인터럽트가 발생하면 main loop 종료
         ros::spinOnce();
-        if(sync_packages(Measures))     // 캐시 queue에서 라이다, IMU 데이터를 삭제하고 시간 정렬을 수행한 후 Measures에 저장
+        if(sync_packages(Measures))     // buffer에 있는 라이다, IMU 데이터를 삭제하고 시간 정렬을 수행한 후 Measures에 저장
         {
-            // 첫 라이다 스캔
-            if (flg_first_scan)
+            if (flg_first_scan)     // 첫 라이다 스캔이면
             {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu->first_lidar_time = first_lidar_time;

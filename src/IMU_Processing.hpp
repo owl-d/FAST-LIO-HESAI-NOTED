@@ -262,10 +262,10 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
   {
     auto &&head = *(it_imu);      // 현재 프레임의 IMU 데이터
     auto &&tail = *(it_imu + 1);  // 다음 프레임의 IMU 데이터
-    // 타임스탬프가 연속적이지 않으면 continue
+    // 다음 프레임의 타임스탬프가 라이다 종료 타임스탬프보다 빠르면 continue
     if (tail->header.stamp.toSec() < last_lidar_end_time_)    continue;
     
-    // median score
+    // 현재 프레임과 다음 프레임의 평균
     angvel_avr<<0.5 * (head->angular_velocity.x + tail->angular_velocity.x),
                 0.5 * (head->angular_velocity.y + tail->angular_velocity.y),
                 0.5 * (head->angular_velocity.z + tail->angular_velocity.z);
@@ -278,7 +278,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     // 중력값으로 가속도 조정
     acc_avr     = acc_avr * G_m_s2 / mean_acc.norm(); // - state_inout.ba;
 
-    // IMU 시작 시간이 최신 라이다 시간보다 빠른 경우 (가장 앞에 마지막 IMU를 삽입하기 때문에 한 번 발생)
+    // IMU 시작 시간이 최신 라이다 시간보다 빠른 경우 (가장 앞에 마지막 IMU를 삽입하기 때문에 처음에 한 번 발생)
     if(head->header.stamp.toSec() < last_lidar_end_time_)
     {
       // 마지막 라이다 시간의 끝에서부터 propagation을 시작해 IMU와의 시간 차이를 계산
@@ -287,11 +287,11 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     }
     else
     {
-      // 두 IMU 모멘트 사이의 시간 차이
+      // 두 IMU 사이의 시간 차이
       dt = tail->header.stamp.toSec() - head->header.stamp.toSec();
     }
     
-    // 업데이트 된 오리지널 측정값의 median
+    // 업데이트 된 오리지널 측정값의 중간값
     in.acc = acc_avr;
     in.gyro = angvel_avr;
     // 공분산 행렬 구성
@@ -305,8 +305,8 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     /* save the poses at each IMU measurements */
     // IMU 예측 과정의 status
     imu_state = kf_state.get_x(); 
-    angvel_last = angvel_avr - imu_state.bg;                // 계산한 각속도와 예측한 각속도의 차이
-    acc_s_last  = imu_state.rot * (acc_avr - imu_state.ba); // 계산한 가속도와 예측한 가속도의 차이를 IMU 좌표계로 변환
+    angvel_last = angvel_avr - imu_state.bg;                // 계산한 각속도(중간값)와 예측한 각속도의 차이
+    acc_s_last  = imu_state.rot * (acc_avr - imu_state.ba); // 계산한 가속도(중간값)와 예측한 가속도의 차이를 IMU 좌표계로 변환
     for(int i=0; i<3; i++)
     {
       acc_s_last[i] += imu_state.grav[i];       // world 좌표계의 가속도를 얻기 위해 중력 추가
