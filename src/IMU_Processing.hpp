@@ -191,13 +191,13 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 
     cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     cur_gyr << gyr_acc.x, gyr_acc.y, gyr_acc.z;
 
-    // 현재 프레임에 기반해 평균과 mean difference 업데이트
+    // 현재 프레임에 기반해 평균과 mean difference 업데이트 : moving average
     mean_acc      += (cur_acc - mean_acc) / N;
     mean_gyr      += (cur_gyr - mean_gyr) / N;
 
     // .cwiseProduct() : 해당하는 계수들을 곱한다.
     // 각 iteration 이후 평균이 변하고, 최종 분산 공식에서 최종 평균을 마이너스 연산
-    // variance recursion fomula
+    // variance recursion fomula (wrong fomula! 위에서 mean_acc, mean_gyr 업데이트 안 했으면 맞는 공식이지만, 했으므로 틀림. 여기서 구한 값 사용하지 않고 나중에 scalar로 사용.)
     cov_acc = cov_acc * (N - 1.0) / N + (cur_acc - mean_acc).cwiseProduct(cur_acc - mean_acc) * (N - 1.0) / (N * N);
     cov_gyr = cov_gyr * (N - 1.0) / N + (cur_gyr - mean_gyr).cwiseProduct(cur_gyr - mean_gyr) * (N - 1.0) / (N * N);
 
@@ -260,9 +260,9 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
   // 이 추정의 모든 IMU 측정값에 대해 확인하고 integration, discrete median method, forward propagation 수행
   for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++)
   {
-    auto &&head = *(it_imu);      // 현재 프레임의 IMU 데이터
-    auto &&tail = *(it_imu + 1);  // 다음 프레임의 IMU 데이터
-    // 다음 프레임의 타임스탬프가 라이다 종료 타임스탬프보다 빠르면 continue
+    auto &&head = *(it_imu);      // 이전 프레임의 IMU 데이터
+    auto &&tail = *(it_imu + 1);  // 현재 프레임의 IMU 데이터
+    // 현재 타임스탬프가 이전 프레임 라이다 종료 타임스탬프보다 빠르면 continue
     if (tail->header.stamp.toSec() < last_lidar_end_time_)    continue;
     
     // 현재 프레임과 다음 프레임의 평균
@@ -275,10 +275,10 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
     // fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
 
-    // 중력값으로 가속도 조정
+    // 중력값으로 가속도 조정 : 초기화 단계에서 구한 mean_acc의 norm으로 normalization 한 후 중력 가속도 곱하므로 사용하는 IMU의 단위에 invariant
     acc_avr     = acc_avr * G_m_s2 / mean_acc.norm(); // - state_inout.ba;
 
-    // IMU 시작 시간이 최신 라이다 시간보다 빠른 경우 (가장 앞에 마지막 IMU를 삽입하기 때문에 처음에 한 번 발생)
+    // IMU 시작 시간이 이전 프레임 마지막 라이다 시간보다 빠른 경우 (가장 앞에 마지막 IMU를 삽입하기 때문에 처음에 한 번 발생)
     if(head->header.stamp.toSec() < last_lidar_end_time_)
     {
       // 마지막 라이다 시간의 끝에서부터 propagation을 시작해 IMU와의 시간 차이를 계산
