@@ -1,6 +1,6 @@
 ## FAST-LIO2 Code Noted
 
-**FAST-LIO:**
+**Original FAST-LIO:**
 https://github.com/hku-mars/FAST_LIO
 
 **FAST-LIO-Noted(Ch):**
