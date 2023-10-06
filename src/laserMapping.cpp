@@ -440,23 +440,23 @@ bool sync_packages(MeasureGroup &meas)
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
             ROS_WARN("Too few input point cloud!\n");
         }
-        else if (meas.lidar->points.back().curvature / double(1000) < 0.5 * lidar_mean_scantime)
+        else if (meas.lidar->points.back().curvature / double(1000) < 0.5 * lidar_mean_scantime)    // 평균 스캔타임의 절반이 안 되면 온전한 스캔으로 인정 X
         {
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
         }
         else
         {
-            scan_num ++;
+            scan_num ++;    // 스캔으로 카운트
             lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);    // 라이다 end time = 라이다 타임스탬프 + (라이다 데이터 안 마지막 포인트의 time)
-            lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num;
+            lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num; // 이동평균 업데이트
         }
 
         meas.lidar_end_time = lidar_end_time; // 라이다 측정 시작 타임스탬프
 
-        lidar_pushed = true;    // 라이다 측정을 성공적응로 추출했다는 flag
+        lidar_pushed = true;    // 라이다 스캔을 성공적응로 추출했다는 flag
     }
 
-    // 마지막 IMU 타임스탬프(queue의 마지막)는 마지막 라이다 타임스탬프보다 빠를 수 없다. (타임 스탬프 차이를 계산할 때 last_timestamp_imu에 0.1을 더하기 때문)
+    // 마지막 IMU 타임스탬프(queue의 마지막)는 마지막 라이다 타임스탬프보다 빠르면 안 된다.
     // IMU의 Hz가 라이다보다 더 크고, 라이다를 IMU 기준으로 맞추기 때문에(라이다 end time 뒤에 있는 IMU로 투영) IMU가 더 최신이어야 한다.
     if (last_timestamp_imu < lidar_end_time)
     {
@@ -466,14 +466,13 @@ bool sync_packages(MeasureGroup &meas)
     /*** push imu data, and pop from imu buffer ***/
     double imu_time = imu_buffer.front()->header.stamp.toSec();
     meas.imu.clear();
-    // lidar_beg_time 과 lidar_end_time 사이의 모든 IMU 데이터에 대해
-    // IMU 타임스탬프가 라이다 종료 타임스탬프보다 빠르면, 이번 프레임의 IMU 데이터를 표현하여 meas에 저장된다.
+    // IMU 버퍼가 비어있지 않다면, lidar_beg_time 과 lidar_end_time 사이의 모든 IMU 데이터에 대해
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
     {
         imu_time = imu_buffer.front()->header.stamp.toSec();    // IMU 데이터의 타임스탬프
         if(imu_time > lidar_end_time) break;
-        meas.imu.push_back(imu_buffer.front());     // IMU 데이터를 meas에 넣음
-        imu_buffer.pop_front();
+        meas.imu.push_back(imu_buffer.front());     // IMU 데이터를 meas에 저장
+        imu_buffer.pop_front();                     // IMU 버퍼에서 pop
     }
 
     lidar_buffer.pop_front();   // 라이다 데이터 pop

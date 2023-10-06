@@ -317,30 +317,30 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
   /*** calculated the pos and attitude prediction at the frame-end ***/
   // IMU 측정값의 마지막 프레임도 추가
-  // 라이다 종료 시간이 IMU 보다 느린지 확인 (마지막 IMU 시간이 라이다의 종료보다 빠르거나 느릴 수 있다.)
-  double note = pcl_end_time > imu_end_time ? 1.0 : -1.0;
-  dt = note * (pcl_end_time - imu_end_time);
-  kf_state.predict(dt, Q, in);
+  double note = pcl_end_time > imu_end_time ? 1.0 : -1.0; // 라이다 종료 시간이 IMU 보다 느리면 1, 빠르면 -1 
+  dt = note * (pcl_end_time - imu_end_time);              // note를 곱하므로 dt는 항상 양수
+  kf_state.predict(dt, Q, in);          // forward propagation에서 구한 state, 공분산에 대해 prediction.
   
-  imu_state = kf_state.get_x();         // 다음 프레임에서 사용하기 위해 IMU state 업데이트
+  imu_state = kf_state.get_x();         // IMU state 업데이트
   last_imu_ = meas.imu.back();          // 다음 프레임에서 사용하기 위해 마지막 IMU 측정값 업데이트
   last_lidar_end_time_ = pcl_end_time;  // 다음 프레임에서 사용하기 위해 프레임의 마지막 라이다 측정값의 종료 시간 저장
 
   /*** undistort each lidar point (backward propagation) ***/
   // IMU 예측을 기반으로 라이다 포인트 클라우드 왜곡 제거
-  if (pcl_out.points.begin() == pcl_out.points.end()) return;
-  auto it_pcl = pcl_out.points.end() - 1;
-  for (auto it_kp = IMUpose.end() - 1; it_kp != IMUpose.begin(); it_kp--)
+  if (pcl_out.points.begin() == pcl_out.points.end()) return; // 시작 포인트와 마지막 포인트가 같은 포인트이면 return
+  auto it_pcl = pcl_out.points.end() - 1; // 포인트 클라우드의 가장 마지막 포인트를 가리키는 순환자(iterator)
+  for (auto it_kp = IMUpose.end() - 1; it_kp != IMUpose.begin(); it_kp--) // 예측한 모든 IMUpose에 대해 뒤에서부터 앞으로 backpropagation
   {
-    auto head = it_kp - 1;
-    auto tail = it_kp;
-    R_imu<<MAT_FROM_ARRAY(head->rot);                             // 이전 프레임의 IMU 회전 행렬
+    auto head = it_kp - 1;    // 이전 프레임
+    auto tail = it_kp;        // 현재 프레임
+    R_imu<<MAT_FROM_ARRAY(head->rot);                             // 이전 프레임(head)의 IMU 회전 행렬
     // cout<<"head imu acc: "<<acc_imu.transpose()<<endl; 
-    vel_imu<<VEC_FROM_ARRAY(head->vel);                           // 이전 프레임의 IMU 속도
-    pos_imu<<VEC_FROM_ARRAY(head->pos);                           // 이전 프레임의 IMU position
-    acc_imu<<VEC_FROM_ARRAY(tail->acc);                           // 이전 프레임의 IMU 가속도
-    angvel_avr<<VEC_FROM_ARRAY(tail->gyr);                        // 이전 프레임의 IMU 각속도
+    vel_imu<<VEC_FROM_ARRAY(head->vel);                           // 이전 프레임(head)의 IMU 속도
+    pos_imu<<VEC_FROM_ARRAY(head->pos);                           // 이전 프레임(head)의 IMU position
+    acc_imu<<VEC_FROM_ARRAY(tail->acc);                           // 현재 프레임(tail)의 IMU 가속도
+    angvel_avr<<VEC_FROM_ARRAY(tail->gyr);                        // 현재 프레임(tail)의 IMU 각속도
 
+    // 이전 IMU 프레임(head) 이후의 라이다 클라우드에 대해 왜곡 보정
     // 두 IMU 시간 사이에서 왜곡이 제거되기 때문에, 포인트 클라우드 시간이 이전 IMU 시간보다 느려야 한다.
     for(; it_pcl->curvature / double(1000) > head->offset_time; it_pcl --)    // sec 단위로 변환
     {
@@ -353,8 +353,10 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
       M3D R_i(R_imu * Exp(angvel_avr, dt));       // 포인트의 회전
       
       V3D P_i(it_pcl->x, it_pcl->y, it_pcl->z);                                       // 포인트 position (라이다 좌표계)
-      V3D T_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - imu_state.pos);     // 포인트의 월드 좌표계에서 라이다 마지막의 월드 좌표계
-      V3D P_compensate = imu_state.offset_R_L_I.conjugate() * (imu_state.rot.conjugate() * (R_i * (imu_state.offset_R_L_I * P_i + imu_state.offset_T_L_I) + T_ei) - imu_state.offset_T_L_I);// not accurate!
+      V3D T_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - imu_state.pos);     // 샘플링 시간과 스캔 종료 시간 간의 상대 position
+                                                                                      //  = 계산한 IMU position(world) - 현재 IMU position(world)
+      // 라이다 로컬 측정값을 라이다 scan-end 측정값으로 projection (T_ei는 T_i와 im_state_pose의 상대적인 translation이므로 회전 행렬 두 번 곱함)
+      V3D P_compensate = imu_state.offset_R_L_I.conjugate() * (imu_state.rot.conjugate() * (R_i * (imu_state.offset_R_L_I * P_i + imu_state.offset_T_L_I) + T_ei) - imu_state.offset_T_L_I);
       // conjugate()는 회전 행렬의 켤레, rot.conjugate()는 쿼터니언의 켤레(회전의 inversion)
       // imu_state.offset_R_L_I : 라이다에서 IMU로의 회전 행렬 I^R_L
       // imu_state.offset_T_L_I : I^t_L
@@ -364,7 +366,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
       it_pcl->y = P_compensate(1);
       it_pcl->z = P_compensate(2);
 
-      if (it_pcl == pcl_out.points.begin()) break;
+      if (it_pcl == pcl_out.points.begin()) break;  // 가장 처음 포인트까지 역전파했다면 break
     }
   }
 }
